@@ -1,17 +1,18 @@
 package com.example.roombookingapp;
 
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
+import android.text.Editable;
 import android.text.TextUtils;
+import android.text.TextWatcher;
 import android.view.View;
-import android.widget.TextView;
+import android.widget.ImageView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.recyclerview.widget.LinearLayoutManager;
-import androidx.recyclerview.widget.RecyclerView;
 
-import com.example.roombookingapp.adapters.RoomAdapter;
+import com.bumptech.glide.Glide;
 import com.example.roombookingapp.data.model.Room;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.textfield.TextInputEditText;
@@ -20,154 +21,138 @@ import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.QueryDocumentSnapshot;
 
 import java.util.ArrayList;
-import java.util.List;
 
 public class AdminActivity extends AppCompatActivity {
 
-    // 🔹 Updated to match your new XML (TextInputEditText and MaterialButton)
-    private TextInputEditText roomName, roomCapacity, roomDescription;
-    private MaterialButton addBtn, updateBtn, deleteBtn, logoutBtn;
-    private RecyclerView roomsRecycler;
-    private TextView roomCountBadge;
-    private View emptyState, progressOverlay;
-
-    private RoomAdapter roomAdapter;
-    private List<Room> roomList;
-    private Room selectedRoom = null;
+    private TextInputEditText roomName, roomCapacity, roomDescription, roomImageUrl;
+    private MaterialButton addBtn, updateBtn, viewRoomsBtn, logoutBtn;
+    private ImageView roomImagePreview;
+    private View progressOverlay;
 
     private FirebaseFirestore db = FirebaseFirestore.getInstance();
     private FirebaseAuth mAuth = FirebaseAuth.getInstance();
+    private String roomIdToEdit = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_admin);
 
-        // BIND VIEWS (Must match your new XML IDs)
+        // Bind UI Components
         roomName = findViewById(R.id.roomName);
         roomCapacity = findViewById(R.id.roomCapacity);
         roomDescription = findViewById(R.id.roomDescription);
+        roomImageUrl = findViewById(R.id.roomImageUrl);
+        roomImagePreview = findViewById(R.id.roomImagePreview);
+
         addBtn = findViewById(R.id.addBtn);
         updateBtn = findViewById(R.id.updateBtn);
-        deleteBtn = findViewById(R.id.deleteBtn);
+        viewRoomsBtn = findViewById(R.id.deleteBtn); // We use the third button to GO TO MANAGE
+        viewRoomsBtn.setText("MANAGE ALL");
+        viewRoomsBtn.setTextColor(getResources().getColor(android.R.color.white));
+        viewRoomsBtn.setBackgroundTintList(null); // Optional: reset colors
+
         logoutBtn = findViewById(R.id.logoutBtn);
-        roomsRecycler = findViewById(R.id.roomsRecycler);
-        roomCountBadge = findViewById(R.id.roomCountBadge);
-        emptyState = findViewById(R.id.emptyState);
         progressOverlay = findViewById(R.id.progressOverlay);
 
-        // SETUP RECYCLER
-        roomList = new ArrayList<>();
-        roomAdapter = new RoomAdapter(this, roomList, room -> {
-            selectedRoom = room;
-            roomName.setText(room.getName());
-            roomCapacity.setText(String.valueOf(room.getCapacity()));
-            roomDescription.setText(room.getDescription());
-            Toast.makeText(this, room.getName() + " selected", Toast.LENGTH_SHORT).show();
+        // Check if we came here to EDIT an existing room
+        roomIdToEdit = getIntent().getStringExtra("roomId");
+        if (roomIdToEdit != null) {
+            loadRoomData(roomIdToEdit);
+            addBtn.setVisibility(View.GONE);
+            updateBtn.setVisibility(View.VISIBLE);
+        } else {
+            addBtn.setVisibility(View.VISIBLE);
+            updateBtn.setVisibility(View.GONE);
+        }
+
+        // Live Image Preview Logic
+        roomImageUrl.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void afterTextChanged(Editable s) {
+                String url = s.toString().trim();
+                if (!url.isEmpty()) {
+                    Glide.with(AdminActivity.this).load(url).placeholder(R.drawable.ic_image_placeholder).into(roomImagePreview);
+                    roomImagePreview.setAlpha(1.0f);
+                }
+            }
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
         });
-        roomsRecycler.setLayoutManager(new LinearLayoutManager(this));
-        roomsRecycler.setAdapter(roomAdapter);
 
-        loadRoomsFromFirebase();
+        addBtn.setOnClickListener(v -> saveRoom(false));
+        updateBtn.setOnClickListener(v -> saveRoom(true));
 
-        // LOGOUT (EXIT)
+        // NEW: Go to the Management Dashboard
+        viewRoomsBtn.setOnClickListener(v -> {
+            startActivity(new Intent(AdminActivity.this, ManageRoomsActivity.class));
+        });
+
         logoutBtn.setOnClickListener(v -> {
             mAuth.signOut();
             UserSession.getInstance().clear();
-            Intent intent = new Intent(AdminActivity.this, LoginActivity.class);
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-            startActivity(intent);
+            startActivity(new Intent(this, LoginActivity.class));
             finish();
         });
+    }
 
-        // 🔹 4. ADD ROOM
-        addBtn.setOnClickListener(v -> {
-            String name = roomName.getText().toString().trim();
-            String capStr = roomCapacity.getText().toString().trim();
-            String desc = roomDescription.getText().toString().trim();
-
-            if (TextUtils.isEmpty(name) || TextUtils.isEmpty(capStr)) {
-                roomName.setError("Required");
-                return;
+    private void loadRoomData(String id) {
+        db.collection("rooms").document(id).get().addOnSuccessListener(doc -> {
+            Room r = doc.toObject(Room.class);
+            if (r != null) {
+                roomName.setText(r.getName());
+                roomCapacity.setText(String.valueOf(r.getCapacity()));
+                roomDescription.setText(r.getDescription());
+                roomImageUrl.setText(r.getImageUrl());
             }
-
-            showLoading(true);
-            String roomId = db.collection("rooms").document().getId();
-            Room newRoom = new Room(roomId, name, Integer.parseInt(capStr), desc);
-
-            db.collection("rooms").document(roomId).set(newRoom)
-                    .addOnSuccessListener(aVoid -> {
-                        showLoading(false);
-                        loadRoomsFromFirebase();
-                        clearInputs();
-                        Toast.makeText(this, "Luxury Suite Added! ✨", Toast.LENGTH_SHORT).show();
-                    })
-                    .addOnFailureListener(e -> showLoading(false));
-        });
-
-        // 🔹 5. UPDATE ROOM
-        updateBtn.setOnClickListener(v -> {
-            if (selectedRoom == null) {
-                Toast.makeText(this, "Please select a suite first", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            showLoading(true);
-            Room updatedRoom = new Room(selectedRoom.getId(),
-                    roomName.getText().toString().trim(),
-                    Integer.parseInt(roomCapacity.getText().toString().trim()),
-                    roomDescription.getText().toString().trim());
-
-            updatedRoom.setStatus(selectedRoom.getStatus());
-            updatedRoom.setBookedBy(selectedRoom.getBookedBy());
-
-            db.collection("rooms").document(selectedRoom.getId()).set(updatedRoom)
-                    .addOnSuccessListener(aVoid -> {
-                        showLoading(false);
-                        loadRoomsFromFirebase();
-                        clearInputs();
-                        Toast.makeText(this, "Suite Refined 🔄", Toast.LENGTH_SHORT).show();
-                    });
-        });
-
-        // 🔹 6. DELETE ROOM
-        deleteBtn.setOnClickListener(v -> {
-            if (selectedRoom == null) return;
-            showLoading(true);
-            db.collection("rooms").document(selectedRoom.getId()).delete()
-                    .addOnSuccessListener(aVoid -> {
-                        showLoading(false);
-                        loadRoomsFromFirebase();
-                        clearInputs();
-                        Toast.makeText(this, "Suite Removed 🗑️", Toast.LENGTH_SHORT).show();
-                    });
         });
     }
 
-    private void loadRoomsFromFirebase() {
-        db.collection("rooms").get().addOnCompleteListener(task -> {
-            if (task.isSuccessful()) {
-                roomList.clear();
-                for (QueryDocumentSnapshot document : task.getResult()) {
-                    roomList.add(document.toObject(Room.class));
+    private void saveRoom(boolean isUpdate) {
+        String name = roomName.getText().toString().trim();
+        String capStr = roomCapacity.getText().toString().trim();
+        String desc = roomDescription.getText().toString().trim();
+        String url = roomImageUrl.getText().toString().trim();
+
+        if (TextUtils.isEmpty(name) || TextUtils.isEmpty(capStr)) {
+            Toast.makeText(this, "Complete required fields", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        showLoading(true);
+        String id = isUpdate ? roomIdToEdit : db.collection("rooms").document().getId();
+
+        Room room = new Room(id, name, Integer.parseInt(capStr), desc);
+        room.setImageUrl(url);
+
+        db.collection("rooms").document(id).set(room).addOnSuccessListener(aVoid -> {
+            showLoading(false);
+            if (!isUpdate) prepareNotificationEmail(name);
+            Toast.makeText(this, "Success!", Toast.LENGTH_SHORT).show();
+            finish(); // Close activity after save
+        });
+    }
+
+    private void prepareNotificationEmail(String newRoomName) {
+        db.collection("users").get().addOnCompleteListener(task -> {
+            if (task.isSuccessful() && task.getResult() != null) {
+                ArrayList<String> recipients = new ArrayList<>();
+                for (QueryDocumentSnapshot doc : task.getResult()) {
+                    String email = doc.getString("email");
+                    if (email != null && !email.isEmpty()) recipients.add(email);
                 }
-                roomAdapter.notifyDataSetChanged();
-
-                // Update UI Badges
-                roomCountBadge.setText(String.valueOf(roomList.size()));
-                emptyState.setVisibility(roomList.isEmpty() ? View.VISIBLE : View.GONE);
+                if (!recipients.isEmpty()) {
+                    Intent intent = new Intent(Intent.ACTION_SEND);
+                    intent.setType("message/rfc822");
+                    intent.putExtra(Intent.EXTRA_EMAIL, new String[]{mAuth.getCurrentUser().getEmail()});
+                    intent.putExtra(Intent.EXTRA_BCC, recipients.toArray(new String[0]));
+                    intent.putExtra(Intent.EXTRA_SUBJECT, "✨ New Luxury Suite: " + newRoomName);
+                    intent.putExtra(Intent.EXTRA_TEXT, "A new suite \"" + newRoomName + "\" is now available.");
+                    startActivity(Intent.createChooser(intent, "Notify Users:"));
+                }
             }
         });
     }
 
-    private void showLoading(boolean show) {
-        progressOverlay.setVisibility(show ? View.VISIBLE : View.GONE);
-        progressOverlay.animate().alpha(show ? 1f : 0f).setDuration(300);
-    }
-
-    private void clearInputs() {
-        roomName.setText("");
-        roomCapacity.setText("");
-        roomDescription.setText("");
-        selectedRoom = null;
-    }
+    private void showLoading(boolean s) { progressOverlay.setVisibility(s ? View.VISIBLE : View.GONE); }
 }

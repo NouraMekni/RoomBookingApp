@@ -11,7 +11,8 @@
         private String status;
         private String bookedBy;
 
-        // 1. Keep the empty constructor (MANDATORY for Firebase)
+        private String imageUrl;
+
         public Room() {}
     
         public Room(String id, String name, int capacity, String description) {
@@ -21,6 +22,7 @@
             this.description = description;
             this.status="available";
             this.bookedBy = "";
+            this.imageUrl = "";
         }
     
         // 2. Keep your Getters
@@ -35,6 +37,14 @@
 
         public String getBookedBy() {
             return bookedBy;
+        }
+
+        public String getImageUrl() {
+            return imageUrl;
+        }
+
+        public void setImageUrl(String imageUrl) {
+            this.imageUrl = imageUrl;
         }
 
         public void setBookedBy(String bookedBy) {
