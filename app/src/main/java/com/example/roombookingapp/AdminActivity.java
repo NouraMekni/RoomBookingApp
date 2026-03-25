@@ -1,20 +1,21 @@
 package com.example.roombookingapp;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.text.TextUtils;
-import android.widget.Button;
-import android.widget.EditText;
+import android.view.View;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.graphics.Insets;
-import androidx.core.view.ViewCompat;
-import androidx.core.view.WindowInsetsCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.example.roombookingapp.adapters.RoomAdapter;
 import com.example.roombookingapp.data.model.Room;
+import com.google.android.material.button.MaterialButton;
+import com.google.android.material.textfield.TextInputEditText;
+import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.QueryDocumentSnapshot;
 
@@ -23,117 +24,122 @@ import java.util.List;
 
 public class AdminActivity extends AppCompatActivity {
 
-    EditText roomName, roomCapacity, roomDescription;
-    Button addBtn, updateBtn, deleteBtn;
-    RecyclerView roomsRecycler;
+    // 🔹 Updated to match your new XML (TextInputEditText and MaterialButton)
+    private TextInputEditText roomName, roomCapacity, roomDescription;
+    private MaterialButton addBtn, updateBtn, deleteBtn, logoutBtn;
+    private RecyclerView roomsRecycler;
+    private TextView roomCountBadge;
+    private View emptyState, progressOverlay;
 
-    RoomAdapter roomAdapter;
-    List<Room> roomList;
-    Room selectedRoom = null;
+    private RoomAdapter roomAdapter;
+    private List<Room> roomList;
+    private Room selectedRoom = null;
 
-    // 1. Initialize Firestore correctly
     private FirebaseFirestore db = FirebaseFirestore.getInstance();
+    private FirebaseAuth mAuth = FirebaseAuth.getInstance();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_admin);
 
-        // Bind views
+        // BIND VIEWS (Must match your new XML IDs)
         roomName = findViewById(R.id.roomName);
         roomCapacity = findViewById(R.id.roomCapacity);
         roomDescription = findViewById(R.id.roomDescription);
         addBtn = findViewById(R.id.addBtn);
         updateBtn = findViewById(R.id.updateBtn);
         deleteBtn = findViewById(R.id.deleteBtn);
+        logoutBtn = findViewById(R.id.logoutBtn);
         roomsRecycler = findViewById(R.id.roomsRecycler);
+        roomCountBadge = findViewById(R.id.roomCountBadge);
+        emptyState = findViewById(R.id.emptyState);
+        progressOverlay = findViewById(R.id.progressOverlay);
 
-        // Setup RecyclerView
+        // SETUP RECYCLER
         roomList = new ArrayList<>();
         roomAdapter = new RoomAdapter(this, roomList, room -> {
             selectedRoom = room;
             roomName.setText(room.getName());
             roomCapacity.setText(String.valueOf(room.getCapacity()));
             roomDescription.setText(room.getDescription());
+            Toast.makeText(this, room.getName() + " selected", Toast.LENGTH_SHORT).show();
         });
         roomsRecycler.setLayoutManager(new LinearLayoutManager(this));
         roomsRecycler.setAdapter(roomAdapter);
 
-        // 2. Load existing rooms from Firebase immediately
         loadRoomsFromFirebase();
 
-        // --- ADD ROOM ---
+        // LOGOUT (EXIT)
+        logoutBtn.setOnClickListener(v -> {
+            mAuth.signOut();
+            UserSession.getInstance().clear();
+            Intent intent = new Intent(AdminActivity.this, LoginActivity.class);
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            startActivity(intent);
+            finish();
+        });
+
+        // 🔹 4. ADD ROOM
         addBtn.setOnClickListener(v -> {
             String name = roomName.getText().toString().trim();
             String capStr = roomCapacity.getText().toString().trim();
             String desc = roomDescription.getText().toString().trim();
 
             if (TextUtils.isEmpty(name) || TextUtils.isEmpty(capStr)) {
-                Toast.makeText(this, "Name and Capacity required", Toast.LENGTH_SHORT).show();
+                roomName.setError("Required");
                 return;
             }
 
-            // Create a new document with an auto-generated ID
+            showLoading(true);
             String roomId = db.collection("rooms").document().getId();
             Room newRoom = new Room(roomId, name, Integer.parseInt(capStr), desc);
 
             db.collection("rooms").document(roomId).set(newRoom)
                     .addOnSuccessListener(aVoid -> {
-                        roomList.add(newRoom);
-                        roomAdapter.notifyDataSetChanged();
+                        showLoading(false);
+                        loadRoomsFromFirebase();
                         clearInputs();
-                        Toast.makeText(this, "Room added to Firebase ✅", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(this, "Luxury Suite Added! ✨", Toast.LENGTH_SHORT).show();
                     })
-                    .addOnFailureListener(e -> Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                    .addOnFailureListener(e -> showLoading(false));
         });
 
-        // --- UPDATE ROOM ---
+        // 🔹 5. UPDATE ROOM
         updateBtn.setOnClickListener(v -> {
             if (selectedRoom == null) {
-                Toast.makeText(this, "Select a room from the list first", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Please select a suite first", Toast.LENGTH_SHORT).show();
                 return;
             }
+            showLoading(true);
+            Room updatedRoom = new Room(selectedRoom.getId(),
+                    roomName.getText().toString().trim(),
+                    Integer.parseInt(roomCapacity.getText().toString().trim()),
+                    roomDescription.getText().toString().trim());
 
-            String name = roomName.getText().toString().trim();
-            String capStr = roomCapacity.getText().toString().trim();
-            String desc = roomDescription.getText().toString().trim();
+            updatedRoom.setStatus(selectedRoom.getStatus());
+            updatedRoom.setBookedBy(selectedRoom.getBookedBy());
 
-            Room updatedRoom = new Room(selectedRoom.getId(), name, Integer.parseInt(capStr), desc);
-
-            // Update the document in Firestore using its ID
             db.collection("rooms").document(selectedRoom.getId()).set(updatedRoom)
                     .addOnSuccessListener(aVoid -> {
-                        loadRoomsFromFirebase(); // Refresh the list
+                        showLoading(false);
+                        loadRoomsFromFirebase();
                         clearInputs();
-                        selectedRoom = null;
-                        Toast.makeText(this, "Room updated in Firebase 🔄", Toast.LENGTH_SHORT).show();
-                    })
-                    .addOnFailureListener(e -> Toast.makeText(this, "Update failed", Toast.LENGTH_SHORT).show());
+                        Toast.makeText(this, "Suite Refined 🔄", Toast.LENGTH_SHORT).show();
+                    });
         });
 
-        // --- DELETE ROOM ---
+        // 🔹 6. DELETE ROOM
         deleteBtn.setOnClickListener(v -> {
-            if (selectedRoom == null) {
-                Toast.makeText(this, "Select a room first", Toast.LENGTH_SHORT).show();
-                return;
-            }
-
+            if (selectedRoom == null) return;
+            showLoading(true);
             db.collection("rooms").document(selectedRoom.getId()).delete()
                     .addOnSuccessListener(aVoid -> {
-                        roomList.remove(selectedRoom);
-                        roomAdapter.notifyDataSetChanged();
+                        showLoading(false);
+                        loadRoomsFromFirebase();
                         clearInputs();
-                        selectedRoom = null;
-                        Toast.makeText(this, "Room deleted from Firebase 🗑️", Toast.LENGTH_SHORT).show();
-                    })
-                    .addOnFailureListener(e -> Toast.makeText(this, "Delete failed", Toast.LENGTH_SHORT).show());
-        });
-
-        // Edge-to-edge padding
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
-            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
-            return insets;
+                        Toast.makeText(this, "Suite Removed 🗑️", Toast.LENGTH_SHORT).show();
+                    });
         });
     }
 
@@ -142,19 +148,26 @@ public class AdminActivity extends AppCompatActivity {
             if (task.isSuccessful()) {
                 roomList.clear();
                 for (QueryDocumentSnapshot document : task.getResult()) {
-                    Room room = document.toObject(Room.class);
-                    roomList.add(room);
+                    roomList.add(document.toObject(Room.class));
                 }
                 roomAdapter.notifyDataSetChanged();
-            } else {
-                Toast.makeText(this, "Failed to load rooms", Toast.LENGTH_SHORT).show();
+
+                // Update UI Badges
+                roomCountBadge.setText(String.valueOf(roomList.size()));
+                emptyState.setVisibility(roomList.isEmpty() ? View.VISIBLE : View.GONE);
             }
         });
+    }
+
+    private void showLoading(boolean show) {
+        progressOverlay.setVisibility(show ? View.VISIBLE : View.GONE);
+        progressOverlay.animate().alpha(show ? 1f : 0f).setDuration(300);
     }
 
     private void clearInputs() {
         roomName.setText("");
         roomCapacity.setText("");
         roomDescription.setText("");
+        selectedRoom = null;
     }
 }
