@@ -21,10 +21,25 @@ public class RoomAdapter extends RecyclerView.Adapter<RoomAdapter.ViewHolder> {
 
     private List<Room> roomList;
     private Context context;
+    private OnRoomClickListener listener; // listener for admin clicks
 
+    // Interface for click callback
+    public interface OnRoomClickListener {
+        void onClick(Room room);
+    }
+
+    // Updated constructor for admin support
+    public RoomAdapter(Context context, List<Room> roomList, OnRoomClickListener listener) {
+        this.context = context;
+        this.roomList = roomList;
+        this.listener = listener;
+    }
+
+    // Keep old constructor for regular user
     public RoomAdapter(Context context, List<Room> roomList) {
         this.context = context;
         this.roomList = roomList;
+        this.listener = null;
     }
 
     public static class ViewHolder extends RecyclerView.ViewHolder {
@@ -42,7 +57,6 @@ public class RoomAdapter extends RecyclerView.Adapter<RoomAdapter.ViewHolder> {
     @NonNull
     @Override
     public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        // Ici on gonfle le layout item_room.xml
         View view = LayoutInflater.from(parent.getContext())
                 .inflate(R.layout.item_room, parent, false);
         return new ViewHolder(view);
@@ -55,10 +69,20 @@ public class RoomAdapter extends RecyclerView.Adapter<RoomAdapter.ViewHolder> {
         holder.name.setText(room.getName());
         holder.capacity.setText("Capacity: " + room.getCapacity());
 
+        // Admin click
+        holder.itemView.setOnClickListener(v -> {
+            if (listener != null) {
+                listener.onClick(room);
+            }
+        });
+
+        // Reserve button for regular users
         holder.btnReserve.setOnClickListener(v -> {
-            Intent intent = new Intent(context, ReservationActivity.class);
-            intent.putExtra("roomId", room.getId());
-            context.startActivity(intent);
+            if (listener == null) { // only for regular user
+                Intent intent = new Intent(context, ReservationActivity.class);
+                intent.putExtra("roomId", room.getId());
+                context.startActivity(intent);
+            }
         });
     }
 

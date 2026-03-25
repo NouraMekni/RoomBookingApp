@@ -4,80 +4,100 @@ import android.content.Intent;
 import android.graphics.Paint;
 import android.os.Bundle;
 import android.text.TextUtils;
-import android.view.View;
-import android.widget.Button;
-import android.widget.EditText;
-import android.widget.ProgressBar;
-import android.widget.TextView;
-import android.widget.Toast;
+import android.widget.*;
 
 import androidx.appcompat.app.AppCompatActivity;
 
-import com.google.firebase.auth.FirebaseAuth;
+import com.example.roombookingapp.data.LoginCallback;
+import com.example.roombookingapp.data.LoginDataSource;
+import com.example.roombookingapp.data.model.LoggedInUser;
 
 public class LoginActivity extends AppCompatActivity {
 
-    FirebaseAuth mAuth;
+    private EditText email, password;
+    private Button loginBtn;
+    private TextView goRegister;
+    private ProgressBar loading;
 
-    EditText email, password;
-    Button loginBtn;
-    TextView goRegister;
-    ProgressBar loading;
+    private LoginDataSource loginDataSource;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_login);
 
-        mAuth = FirebaseAuth.getInstance();
+        initViews();
+        loginDataSource = new LoginDataSource();
 
+        // underline "Go Register"
+        goRegister.setPaintFlags(goRegister.getPaintFlags() | Paint.UNDERLINE_TEXT_FLAG);
+
+        goRegister.setOnClickListener(v -> navigateToRegister());
+        loginBtn.setOnClickListener(v -> attemptLogin());
+    }
+
+    private void initViews() {
         email = findViewById(R.id.email);
         password = findViewById(R.id.password);
         loginBtn = findViewById(R.id.loginBtn);
         goRegister = findViewById(R.id.goRegister);
         loading = findViewById(R.id.loading);
+    }
 
-        // underline "Go Register"
-        goRegister.setPaintFlags(goRegister.getPaintFlags() | Paint.UNDERLINE_TEXT_FLAG);
+    private void navigateToRegister() {
+        startActivity(new Intent(LoginActivity.this, RegisterActivity.class));
+    }
 
-        // Login button click
-        loginBtn.setOnClickListener(v -> {
-            String userEmail = email.getText().toString().trim();
-            String userPass = password.getText().toString().trim();
+    private void attemptLogin() {
+        String userEmail = email.getText().toString().trim();
+        String userPass = password.getText().toString().trim();
 
-            // Input validation
-            if (TextUtils.isEmpty(userEmail)) {
-                email.setError("Email required");
-                return;
+        if (!validateInputs(userEmail, userPass)) return;
+
+        setLoadingState(true);
+
+        // Use DataSource with callback
+        loginDataSource.login(userEmail, userPass, new LoginCallback() {
+            @Override
+            public void onSuccess(LoggedInUser user) {
+                setLoadingState(false);
+
+                // Save user in session
+                UserSession.getInstance().setCurrentUser(user);
+
+                // Role-based navigation
+                if ("admin".equalsIgnoreCase(user.getRole())) {
+                    startActivity(new Intent(LoginActivity.this, AdminActivity.class));
+                } else {
+                    startActivity(new Intent(LoginActivity.this, MainActivity.class));
+                }
+                finish();
             }
 
-            if (TextUtils.isEmpty(userPass)) {
-                password.setError("Password required");
-                return;
+            @Override
+            public void onError(Exception e) {
+                setLoadingState(false);
+                Toast.makeText(LoginActivity.this,
+                        "Login failed: " + e.getMessage(),
+                        Toast.LENGTH_LONG).show();
             }
-
-            loginBtn.setEnabled(false); // prevent multiple clicks
-            loading.setVisibility(View.VISIBLE);
-
-            mAuth.signInWithEmailAndPassword(userEmail, userPass)
-                    .addOnCompleteListener(task -> {
-                        loading.setVisibility(View.GONE);
-                        loginBtn.setEnabled(true);
-
-                        if (task.isSuccessful()) {
-                            startActivity(new Intent(LoginActivity.this, MainActivity.class));
-                            finish();
-                        } else {
-                            Toast.makeText(LoginActivity.this,
-                                    "Login failed: " + task.getException().getMessage(),
-                                    Toast.LENGTH_LONG).show();
-                        }
-                    });
         });
+    }
 
-        // Go to Register screen
-        goRegister.setOnClickListener(v -> {
-            startActivity(new Intent(LoginActivity.this, RegisterActivity.class));
-        });
+    private boolean validateInputs(String email, String password) {
+        if (TextUtils.isEmpty(email)) {
+            this.email.setError("Email required");
+            return false;
+        }
+        if (TextUtils.isEmpty(password)) {
+            this.password.setError("Password required");
+            return false;
+        }
+        return true;
+    }
+
+    private void setLoadingState(boolean isLoading) {
+        loginBtn.setEnabled(!isLoading);
+        loading.setVisibility(isLoading ? ProgressBar.VISIBLE : ProgressBar.GONE);
     }
 }

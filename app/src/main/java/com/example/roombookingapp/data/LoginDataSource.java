@@ -1,29 +1,53 @@
 package com.example.roombookingapp.data;
 
 import com.example.roombookingapp.data.model.LoggedInUser;
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.firestore.FirebaseFirestore;
 
-import java.io.IOException;
-
-/**
- * Class that handles authentication w/ login credentials and retrieves user information.
- */
 public class LoginDataSource {
 
-    public Result<LoggedInUser> login(String username, String password) {
+    private FirebaseAuth mAuth = FirebaseAuth.getInstance();
+    private FirebaseFirestore db = FirebaseFirestore.getInstance();
 
-        try {
-            // TODO: handle loggedInUser authentication
-            LoggedInUser fakeUser =
-                    new LoggedInUser(
-                            java.util.UUID.randomUUID().toString(),
-                            "Jane Doe");
-            return new Result.Success<>(fakeUser);
-        } catch (Exception e) {
-            return new Result.Error(new IOException("Error logging in", e));
-        }
+    public void login(String email, String password, LoginCallback callback) {
+
+        mAuth.signInWithEmailAndPassword(email, password)
+                .addOnCompleteListener(task -> {
+
+                    if (task.isSuccessful()) {
+
+                        String uid = mAuth.getCurrentUser().getUid();
+
+                        // Get user role from Firestore
+                        db.collection("users").document(uid).get()
+                                .addOnSuccessListener(document -> {
+
+                                    if (document.exists()) {
+
+                                        String name = document.getString("name");
+                                        String role = document.getString("role");
+
+                                        LoggedInUser user = new LoggedInUser(
+                                                uid,
+                                                name,
+                                                role
+                                        );
+
+                                        callback.onSuccess(user);
+
+                                    } else {
+                                        callback.onError(new Exception("User data not found"));
+                                    }
+                                })
+                                .addOnFailureListener(callback::onError);
+
+                    } else {
+                        callback.onError(task.getException());
+                    }
+                });
     }
 
     public void logout() {
-        // TODO: revoke authentication
+        mAuth.signOut();
     }
 }

@@ -12,6 +12,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Roombookingapp">
         <activity
+            android:name=".AdminActivity"
+            android:exported="false" />
+        <activity
             android:name=".MyBookingsActivity"
             android:exported="false" />
         <activity
