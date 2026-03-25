@@ -1,5 +1,5 @@
 package com.example.roombookingapp;
-import com.example.roombookingapp.R;
+
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.widget.Button;
@@ -15,6 +15,8 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.example.roombookingapp.adapters.RoomAdapter;
 import com.example.roombookingapp.data.model.Room;
+import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.QueryDocumentSnapshot;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -29,17 +31,13 @@ public class AdminActivity extends AppCompatActivity {
     List<Room> roomList;
     Room selectedRoom = null;
 
+    // 1. Initialize Firestore correctly
+    private FirebaseFirestore db = FirebaseFirestore.getInstance();
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_admin);
-
-        // Edge-to-edge padding
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
-            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
-            return insets;
-        });
 
         // Bind views
         roomName = findViewById(R.id.roomName);
@@ -53,7 +51,6 @@ public class AdminActivity extends AppCompatActivity {
         // Setup RecyclerView
         roomList = new ArrayList<>();
         roomAdapter = new RoomAdapter(this, roomList, room -> {
-            // On room clicked -> select it
             selectedRoom = room;
             roomName.setText(room.getName());
             roomCapacity.setText(String.valueOf(room.getCapacity()));
@@ -62,63 +59,96 @@ public class AdminActivity extends AppCompatActivity {
         roomsRecycler.setLayoutManager(new LinearLayoutManager(this));
         roomsRecycler.setAdapter(roomAdapter);
 
-        // Add room
+        // 2. Load existing rooms from Firebase immediately
+        loadRoomsFromFirebase();
+
+        // --- ADD ROOM ---
         addBtn.setOnClickListener(v -> {
             String name = roomName.getText().toString().trim();
-            String capacityStr = roomCapacity.getText().toString().trim();
-            String description = roomDescription.getText().toString().trim();
+            String capStr = roomCapacity.getText().toString().trim();
+            String desc = roomDescription.getText().toString().trim();
 
-            if (TextUtils.isEmpty(name) || TextUtils.isEmpty(capacityStr)) {
+            if (TextUtils.isEmpty(name) || TextUtils.isEmpty(capStr)) {
                 Toast.makeText(this, "Name and Capacity required", Toast.LENGTH_SHORT).show();
                 return;
             }
 
-            int capacity = Integer.parseInt(capacityStr);
-            Room newRoom = new Room("room" + (roomList.size() + 1), name, capacity, description);
-            roomList.add(newRoom);
-            roomAdapter.notifyDataSetChanged();
-            clearInputs();
-            Toast.makeText(this, "Room added", Toast.LENGTH_SHORT).show();
+            // Create a new document with an auto-generated ID
+            String roomId = db.collection("rooms").document().getId();
+            Room newRoom = new Room(roomId, name, Integer.parseInt(capStr), desc);
+
+            db.collection("rooms").document(roomId).set(newRoom)
+                    .addOnSuccessListener(aVoid -> {
+                        roomList.add(newRoom);
+                        roomAdapter.notifyDataSetChanged();
+                        clearInputs();
+                        Toast.makeText(this, "Room added to Firebase ✅", Toast.LENGTH_SHORT).show();
+                    })
+                    .addOnFailureListener(e -> Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
         });
 
-        // Update room
+        // --- UPDATE ROOM ---
         updateBtn.setOnClickListener(v -> {
             if (selectedRoom == null) {
-                Toast.makeText(this, "Select a room first", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Select a room from the list first", Toast.LENGTH_SHORT).show();
                 return;
             }
 
             String name = roomName.getText().toString().trim();
-            String capacityStr = roomCapacity.getText().toString().trim();
-            String description = roomDescription.getText().toString().trim();
+            String capStr = roomCapacity.getText().toString().trim();
+            String desc = roomDescription.getText().toString().trim();
 
-            if (TextUtils.isEmpty(name) || TextUtils.isEmpty(capacityStr)) {
-                Toast.makeText(this, "Name and Capacity required", Toast.LENGTH_SHORT).show();
-                return;
-            }
+            Room updatedRoom = new Room(selectedRoom.getId(), name, Integer.parseInt(capStr), desc);
 
-            selectedRoom = new Room(selectedRoom.getId(), name, Integer.parseInt(capacityStr), description);
-            int index = roomList.indexOf(selectedRoom);
-            if (index != -1) {
-                roomList.set(index, selectedRoom);
-                roomAdapter.notifyDataSetChanged();
-                clearInputs();
-                selectedRoom = null;
-                Toast.makeText(this, "Room updated", Toast.LENGTH_SHORT).show();
-            }
+            // Update the document in Firestore using its ID
+            db.collection("rooms").document(selectedRoom.getId()).set(updatedRoom)
+                    .addOnSuccessListener(aVoid -> {
+                        loadRoomsFromFirebase(); // Refresh the list
+                        clearInputs();
+                        selectedRoom = null;
+                        Toast.makeText(this, "Room updated in Firebase 🔄", Toast.LENGTH_SHORT).show();
+                    })
+                    .addOnFailureListener(e -> Toast.makeText(this, "Update failed", Toast.LENGTH_SHORT).show());
         });
 
-        // Delete room
+        // --- DELETE ROOM ---
         deleteBtn.setOnClickListener(v -> {
             if (selectedRoom == null) {
                 Toast.makeText(this, "Select a room first", Toast.LENGTH_SHORT).show();
                 return;
             }
-            roomList.remove(selectedRoom);
-            roomAdapter.notifyDataSetChanged();
-            clearInputs();
-            selectedRoom = null;
-            Toast.makeText(this, "Room deleted", Toast.LENGTH_SHORT).show();
+
+            db.collection("rooms").document(selectedRoom.getId()).delete()
+                    .addOnSuccessListener(aVoid -> {
+                        roomList.remove(selectedRoom);
+                        roomAdapter.notifyDataSetChanged();
+                        clearInputs();
+                        selectedRoom = null;
+                        Toast.makeText(this, "Room deleted from Firebase 🗑️", Toast.LENGTH_SHORT).show();
+                    })
+                    .addOnFailureListener(e -> Toast.makeText(this, "Delete failed", Toast.LENGTH_SHORT).show());
+        });
+
+        // Edge-to-edge padding
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
+            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
+            return insets;
+        });
+    }
+
+    private void loadRoomsFromFirebase() {
+        db.collection("rooms").get().addOnCompleteListener(task -> {
+            if (task.isSuccessful()) {
+                roomList.clear();
+                for (QueryDocumentSnapshot document : task.getResult()) {
+                    Room room = document.toObject(Room.class);
+                    roomList.add(room);
+                }
+                roomAdapter.notifyDataSetChanged();
+            } else {
+                Toast.makeText(this, "Failed to load rooms", Toast.LENGTH_SHORT).show();
+            }
         });
     }
 

@@ -3,6 +3,7 @@ package com.example.roombookingapp;
 import android.content.Intent;
 import android.os.Bundle;
 import android.widget.Button;
+import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
@@ -14,6 +15,8 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.example.roombookingapp.adapters.RoomAdapter;
 import com.example.roombookingapp.data.model.Room;
 import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.QueryDocumentSnapshot;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -21,6 +24,9 @@ import java.util.List;
 public class MainActivity extends AppCompatActivity {
 
     FirebaseAuth mAuth;
+    // 1. Initialize Firestore
+    FirebaseFirestore db = FirebaseFirestore.getInstance();
+
     RecyclerView roomsRecyclerView;
     RoomAdapter roomAdapter;
     List<Room> roomList;
@@ -31,18 +37,14 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         mAuth = FirebaseAuth.getInstance();
-
-        // 🔥 Get the current user from singleton
         UserSession session = UserSession.getInstance();
 
-        // 🔥 Check if user session exists
         if (session.getCurrentUser() == null) {
             startActivity(new Intent(this, LoginActivity.class));
             finish();
             return;
         }
 
-        // 🔥 Prevent admin from accessing MainActivity
         if ("admin".equals(session.getCurrentUser().getRole())) {
             startActivity(new Intent(this, AdminActivity.class));
             finish();
@@ -53,13 +55,13 @@ public class MainActivity extends AppCompatActivity {
         roomsRecyclerView = findViewById(R.id.roomsRecyclerView);
         roomsRecyclerView.setLayoutManager(new LinearLayoutManager(this));
         roomList = new ArrayList<>();
+
+        // Pass a listener if your RoomAdapter needs it for clicking a room
         roomAdapter = new RoomAdapter(this, roomList);
         roomsRecyclerView.setAdapter(roomAdapter);
 
-        // Dummy rooms
-        roomList.add(new Room("room1", "Salle A", 20, "Salle pour réunion"));
-        roomList.add(new Room("room2", "Salle B", 10, "Petite salle"));
-        roomAdapter.notifyDataSetChanged();
+        // 2. 🔥 REPLACE Dummy rooms with Firestore data
+        loadRoomsFromFirebase();
 
         // Buttons
         Button bookRoomBtn = findViewById(R.id.bookRoomBtn);
@@ -71,19 +73,34 @@ public class MainActivity extends AppCompatActivity {
 
         logoutBtn.setOnClickListener(v -> {
             mAuth.signOut();
-
-            // 🔥 Clear session properly
             session.setCurrentUser(null);
-
             startActivity(new Intent(this, LoginActivity.class));
             finish();
         });
 
-        // Insets
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
             Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
             return insets;
         });
+    }
+
+    // 3. New Method to fetch rooms
+    private void loadRoomsFromFirebase() {
+        db.collection("rooms")
+                .get()
+                .addOnCompleteListener(task -> {
+                    if (task.isSuccessful()) {
+                        roomList.clear(); // Clear local list first
+                        for (QueryDocumentSnapshot document : task.getResult()) {
+                            // Firebase automatically maps the document to your Room class
+                            Room room = document.toObject(Room.class);
+                            roomList.add(room);
+                        }
+                        roomAdapter.notifyDataSetChanged();
+                    } else {
+                        Toast.makeText(this, "Error fetching rooms: " + task.getException().getMessage(), Toast.LENGTH_SHORT).show();
+                    }
+                });
     }
 }

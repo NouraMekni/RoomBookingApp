@@ -24,7 +24,7 @@ public class LoginDataSource {
 
                                     if (document.exists()) {
 
-                                        String name = document.getString("name");
+                                        String name = document.getString("displayName");
                                         String role = document.getString("role");
 
                                         LoggedInUser user = new LoggedInUser(
